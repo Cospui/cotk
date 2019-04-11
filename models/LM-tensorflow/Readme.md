@@ -98,7 +98,72 @@ Following plot are shown in this model:
 
 And text output:
 
-![text_arg](images/text_arg.png)
+```{  
+
+{
+"epochs": 10,  
+
+"lr": 0.1,  
+
+"log_dir": "./tensorboard",  
+
+"name": "LM",  
+
+"max_sen_length": 50,  
+
+"checkpoint_max_to_keep": 5,  
+
+"embedding_size": 300,  
+
+"momentum": 0.9,  
+
+"checkpoint_steps": 1000,  
+
+"datapath": "resources://MSCOCO~tsinghua",  
+
+"cache": false,  
+
+"debug": false,  
+
+"wvclass": null,  
+
+"restore": "last",  
+
+"show_sample": [  
+
+0
+
+],  
+
+"wvpath": null,  
+
+"dh_size": 200,  
+
+"batch_size": 128,  
+
+"lr_decay": 0.995,  
+
+"model_dir": "./model",  
+
+"out_dir": "./output",  
+
+"cache_dir": "./cache",  
+
+"softmax_samples": 512,  
+
+"mode": "train",  
+
+"grad_clip": 5.0,  
+
+"dataset": "MSCOCO",  
+
+"cuda": true  
+
+}
+
+```
+
+
 
 Following text are shown in this model:
 
@@ -113,25 +178,43 @@ Execute ``python run.py --mode test --restore last``
 The following output will be in `./output/[name]_test.txt`:
 
 ```
-perplexity:	1.005377
-This A black Old motorcycle parked in front of a garage .
-This An office holder with four different types of computers .
-This Two women waiting at a bench next to a street .
-This A tan toilet and sink holder in a small room .
-This A beautiful dessert waiting to be is by two people .
-This A woman sitting on a bench in the middle of the city .
-This A cat eating a bird it has holder .
-This A shot of an elderly man inside a kitchen .
-This A woman sitting on a bench and a woman standing behind the bench at a bus stop .
-This An old man is wearing an odd hat .
-This A man sleeping with his cat next to him .
-This An office with desk computer and chair and laptop .
-This Two white toilet with a faucet and holder .
-This A woman and another woman waiting at a stop .
-This Close up of a white kitchen , with a coffee is on counter .
-This A white stove and cabinet inside a kitchen .
-This A cat stands between two parked cars on a grassy sidewalk .
+self-bleu-3:	0.709417
+bw-bleu-3:	0.513164
+self-bleu-4:	0.515631
+bw-bleu-4:	0.336216
+self-bleu-2:	0.870640
+fw-bw-bleu-3:	0.550495
+perplexity:	13.409582
+fw-bleu-4:	0.371952
+fw-bleu-2:	0.836639
+fw-bw-bleu-4:	0.353182
+fw-bleu-3:	0.593684
+bw-bleu-2:	0.723493
+fw-bw-bleu-2:	0.775963
+A man and motorcycle parked on front of a building .
+A old desk with a computers computers of computers .
+A people in to a table in to a tree sign
+A man dog with a in in a bathroom bathroom .
+A man young plate to be served by a people .
+A man is on a bench next front park of a woods .
+A man is a piece feeder 's a in
+A man of a old man in a small .
+A man is on a bench next looking dog is on her fence . the park station .
+A old man is standing a orange tie .
+A man is in a dog in to a .
+A old desk a and and a and desk .
+A of and and a black and a .
+A man is a man sitting to a table sign
+A up of a plate plate with with a stove pot . the .
+A man plate top oven in of kitchen .
+A man is on a small cars in a street field .
+A man of people are down a street lined street .
+A man is in two legs and in a couch . a .
+A man is two legs of a person on out a television .
+A in a helmet a on front of a building of people .
+A man is standing on a dog on a laptop .
 ...
+
 ```
 
 #### For developer
@@ -151,3 +234,7 @@ This A cat stands between two parked cars on a grassy sidewalk .
 ### Author
 
 [Qi Zhu](https://github.com/zqwerty)
+
+```
+
+```

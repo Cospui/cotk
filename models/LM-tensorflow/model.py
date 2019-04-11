@@ -4,17 +4,14 @@ import time
 
 from tensorflow.python.ops.nn import dynamic_rnn
 from tensorflow.python.layers.core import Dense
-from tensorflow.contrib import rnn
-from tensorflow.contrib import legacy_seq2seq
 from utils import SummaryHelper
 
 class LMModel(object):
 	def __init__(self, data, args, embed):
-		self.args = args
 
 		with tf.variable_scope("input"):
 			with tf.variable_scope("embedding"):
-			# build the embedding table and embedding input
+				# build the embedding table and embedding input
 				if embed is None:
 					# initialize the embedding randomly
 					self.embed = tf.get_variable('embed', [data.vocab_size, args.embedding_size], tf.float32)
@@ -22,77 +19,58 @@ class LMModel(object):
 					# initialize the embedding by pre-trained word vectors
 					self.embed = tf.get_variable('embed', dtype=tf.float32, initializer=embed)
 
-			self.raw_input_data = tf.placeholder( tf.int32, (None, None) ) # batch * len
-			self.raw_input_data_length = tf.placeholder( tf.int32, (None,) ) # batch
-
+			# input
+			self.sentence = tf.placeholder(tf.int32, (None, None), 'sen_inps')  # batch*len
+			self.sentence_length = tf.placeholder(tf.int32, (None,), 'sen_lens')  # batch
 			self.use_prior = tf.placeholder(dtype=tf.bool, name="use_prior")
 
-			batch_size, batch_len = tf.shape(self.raw_input_data)[0], tf.shape(self.raw_input_data)[1]
-			self.decoder_max_len = batch_len - 1
+			batch_size, batch_len = tf.shape(self.sentence)[0], tf.shape(self.sentence)[1]
+			self.scentence_max_len = batch_len - 1
 
-			self.input_data = tf.nn.embedding_lookup(self.embed, self.raw_input_data)  # batch*len*unit
-			self.input_data_len = self.raw_input_data_length
-
-			decoder_input = tf.split(self.raw_input_data, [self.decoder_max_len, 1], 1)[0]  # no eos_id
-			self.decoder_input = tf.nn.embedding_lookup(self.embed, decoder_input)  # batch*(len-1)*unit
-			self.decoder_target = tf.split(self.raw_input_data, [1, self.decoder_max_len], 1)[1]  # no go_id, batch*(len-1)
-			self.decoder_len = self.raw_input_data_length - 1
-			self.decoder_mask = tf.sequence_mask(self.decoder_len, self.decoder_max_len, dtype=tf.float32)  # batch*(len-1)
+			# data processing
+			LM_input = tf.split(self.sentence, [self.scentence_max_len, 1], 1)[0]  # no eos_id
+			self.LM_input = tf.nn.embedding_lookup(self.embed, LM_input)  # batch*(len-1)*unit
+			self.LM_target = tf.split(self.sentence, [1, self.scentence_max_len], 1)[1]  # no go_id, batch*(len-1)
+			self.input_len = self.sentence_length - 1
+			self.input_mask = tf.sequence_mask(self.input_len, self.scentence_max_len, dtype=tf.float32)  # 0 for <pad>, batch*(len-1)
 
 		# initialize the training process
 		self.learning_rate = tf.Variable(float(args.lr), trainable=False, dtype=tf.float32)
 		self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * args.lr_decay)
 		self.global_step = tf.Variable(0, trainable=False)
 
-		# build rnn_cell
-		cellLSTM = tf.nn.rnn_cell.LSTMCell(args.dh_size)
-		cellLSTMs = []
-		cellLSTMs.append( cellLSTM )
-		cell = rnn.MultiRNNCell(cellLSTMs, state_is_tuple=True)
-
-		initial_state = cell.zero_state(batch_size, tf.float32)
-
+		# build LSTM NN
+		basic_cell = tf.nn.rnn_cell.LSTMCell(args.dh_size)
 		with tf.variable_scope('rnnlm'):
-			softmax_w = tf.get_variable("softmax_w", [args.dh_size, data.vocab_size])
-			softmax_b = tf.get_variable("softmax_b", [data.vocab_size])
+			LM_output, _ = dynamic_rnn(basic_cell, self.LM_input, self.input_len, dtype=tf.float32, scope="rnnlm")
+		# fullly connected layer
+		LM_output = tf.layers.dense(inputs=LM_output, units=data.vocab_size) # shape of LM_output: (batch_size, batch_len-1, vocab_size)
+		
+		# loss
+		with tf.variable_scope("loss", initializer=tf.orthogonal_initializer()):
+			crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=LM_output, labels=self.LM_target)
+			crossent = tf.reduce_sum(crossent * self.input_mask)	# to ignore <pad>s
+			
+			self.sen_loss = crossent / tf.to_float(batch_size)
+			self.ppl_loss = crossent / tf.reduce_sum(self.input_mask) # crossent per word.	
+			# self.ppl_loss = tf.Print(self.ppl_loss, [self.ppl_loss] )
 
-		self.input_max_len = batch_len - 1
-		inputs = tf.split(self.input_data, [self.input_max_len, 1], 1)[0]
+			self.decoder_distribution_teacher = tf.nn.log_softmax(LM_output)
+		with tf.variable_scope("decode", reuse=True):
+			self.decoder_distribution = LM_output # (batch_size, batch_len-1, vocab_size)
+			# for inference
+			self.generation_index = tf.argmax(tf.split(self.decoder_distribution,
+													   [2, data.vocab_size - 2], 2)[1], 2) + 2  # for removing UNK. 0 for <pad> and 1 for <unk>
 
-		def loop(prev, _):
-			prev = tf.matmul(prev, softmax_w) + softmax_b
-			prev_symbol = tf.stop_gradient(tf.argmax(prev, 1))
-			return tf.nn.embedding_lookup(embedding, prev_symbol)
-		# rnn_decoder to generate the ouputs and final state. When we are not training the model, we use the loop function.
-		outputs, last_state = legacy_seq2seq.rnn_decoder(inputs, self.initial_state, cell, loop_function=loop if not training else None, scope='rnnlm')
-		output = tf.reshape(tf.concat(outputs, 1), [-1, args.rnn_size])
 
-		self.logits = tf.matmul(output, softmax_w) + softmax_b
-		self.probs = tf.nn.softmax(self.logits)
+		self.loss = self.sen_loss
 
-        # loss is calculate by the log loss and taking the average.
-        # return the log-perplexity
-		loss = legacy_seq2seq.sequence_loss_by_example(
-                [self.logits],
-                [tf.reshape(self.targets, [-1])], #此处的-1是自己计算之意，即让其变为一维向量。
-                [tf.ones([args.batch_size * args.seq_length])])
-		with tf.name_scope('cost'):
-			self.cost = tf.reduce_sum(loss) / args.batch_size / args.seq_length
-		self.final_state = last_state
-		self.lr = tf.Variable(0.0, trainable=False)
-		tvars = tf.trainable_variables()
-
-        # calculate gradients
-		grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), args.grad_clip)
-		with tf.name_scope('optimizer'):
-			optimizer = tf.train.AdamOptimizer(self.lr)
-
-		self.train_op = optimizer.apply_gradients(zip(grads, tvars))
-
-        # instrument tensorboard
-		tf.summary.histogram('logits', self.logits)
-		tf.summary.histogram('loss', loss)
-		tf.summary.scalar('train_loss', self.cost)
+		# calculate the gradient of parameters and update
+		self.params = [k for k in tf.trainable_variables() if args.name in k.name]
+		gradients = tf.gradients(self.loss, self.params)
+		clipped_gradients, self.gradient_norm = tf.clip_by_global_norm(gradients, args.grad_clip)
+		opt = tf.train.MomentumOptimizer(learning_rate=self.learning_rate, momentum=args.momentum)
+		self.update = opt.apply_gradients(zip(clipped_gradients, self.params), global_step=self.global_step)
 
 		# save checkpoint
 		self.latest_saver = tf.train.Saver(write_version=tf.train.SaverDef.V2,
@@ -108,7 +86,6 @@ class LMModel(object):
 			self.latest_saver.save(sess, path, global_step = self.global_step)
 		else:
 			self.best_saver.save(sess, path, global_step = self.global_step)
-			#self.best_global_step = self.global_step
 
 	def create_summary(self, args):
 		self.summaryHelper = SummaryHelper("%s/%s_%s" % \
@@ -133,38 +110,44 @@ class LMModel(object):
 		for item in self.params:
 			print('%s: %s' % (item.name, item.get_shape()))
 
-	def step_decoder(self, session, data, forward_only=False):
-		input_feed = {self.raw_input_data: data['sent'],
-					  self.raw_input_data_length: data['sent_length'],
+	def step_LM(self, session, data, forward_only=False):
+		'''
+		run the LM for one step (batch)
+		'''
+		input_feed = {self.sentence: data['sent'],
+					  self.sentence_length: data['sent_length'],
 					  self.use_prior: False}
 		if forward_only:
+			# test mode
 			output_feed = [self.loss,
 						   self.decoder_distribution_teacher,
-						   self.ppl_loss
-						  ]
+						   self.ppl_loss]
 		else:
+			# train mode
 			output_feed = [self.loss,
 						   self.gradient_norm,
 						   self.update,
-						   self.ppl_loss
-						   ]
+						   self.ppl_loss]
 		return session.run(output_feed, input_feed)
 
 	def inference(self, session, data):
-		input_feed = {self.raw_input_data: data['sent'],
-					  self.raw_input_data_length: data['sent_length']
-					 }
+		input_feed = {self.sentence: data['sent'],
+					  self.sentence_length: data['sent_length']}
 		output_feed = [self.generation_index]
 		return session.run(output_feed, input_feed)
 
 	def evaluate(self, sess, data, batch_size, key_name):
+		'''
+		to get the loss and ppl_loss per step on dev and test
+		'''
 		loss_step = np.zeros((1,))
 		ppl_loss_step = 0
 		times = 0
-		data.restart(key_name, batch_size=batch_size, shuffle=False)
+
+		data.restart(key_name, batch_size=batch_size, shuffle=False) # initialize mini-batches
 		batched_data = data.get_next_batch(key_name)
 		while batched_data != None:
-			outputs = self.step_decoder(sess, batched_data, forward_only=True)
+			outputs = self.step_LM(sess, batched_data, forward_only=True)
 			loss_step += outputs[0]
 			ppl_loss_step += outputs[-1]
 			times += 1
@@ -177,16 +160,14 @@ class LMModel(object):
 		return loss_step, ppl_loss_step
 
 	def train_process(self, sess, data, args):
-
+		# 'X_step' <=> X per step
 		loss_step, time_step, epoch_step = np.zeros((1,)), .0, 0
 		ppl_loss_step = 0
-		previous_losses = [1e18] * 5
+		previous_losses = [1e18] * 5 # previous 5 losses
 		best_valid = 1e18
+
 		data.restart("train", batch_size=args.batch_size, shuffle=True)
 		batched_data = data.get_next_batch("train")
-
-		print( "EVERY THING FINE!!")
-
 		for epoch_step in range(args.epochs):
 			while batched_data != None:
 				if self.global_step.eval() % args.checkpoint_steps == 0 and self.global_step.eval() != 0:
@@ -198,7 +179,6 @@ class LMModel(object):
 									  {'loss': loss_step,
 									   'perplexity': np.exp(ppl_loss_step),
 									   })
-					#self.saver.save(sess, '%s/checkpoint_latest' % args.model_dir, global_step=self.global_step)\
 					self.store_checkpoint(sess, '%s/checkpoint_latest/checkpoint' % args.model_dir, "latest")
 
 					devout = self.evaluate(sess, data, args.batch_size, "dev")
@@ -218,12 +198,14 @@ class LMModel(object):
 						best_valid = devout[0]
 						self.store_checkpoint(sess, '%s/checkpoint_best/checkpoint' % args.model_dir, "best")
 
-					previous_losses = previous_losses[1:] + [np.sum(loss_step)]
+					previous_losses = previous_losses[1:] + [np.sum(loss_step)] 
 					loss_step, time_step = np.zeros((1,)), .0
 					ppl_loss_step = 0
 
 				start_time = time.time()
-				outputs = self.step_decoder(sess, batched_data)
+				outputs = self.step_LM(sess, batched_data)
+				
+				# outputs: loss, decoder_distribution_teacher, ppl_loss
 				loss_step += outputs[0] / args.checkpoint_steps
 				ppl_loss_step += outputs[-1] / args.checkpoint_steps
 
@@ -241,7 +223,7 @@ class LMModel(object):
 		results = []
 		while batched_data != None:
 			batched_responses_id = self.inference(sess, batched_data)[0]
-			gen_prob = self.step_decoder(sess, batched_data, forward_only=True)[1]
+			gen_prob = self.step_LM(sess, batched_data, forward_only=True)[1]
 			metric1_data = {'sent_allvocabs': np.array(batched_data['sent_allvocabs']),
 							'sent_length': np.array(batched_data['sent_length']),
 							'gen_log_prob': np.array(gen_prob)}
