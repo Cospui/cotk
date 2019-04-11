@@ -89,11 +89,11 @@ Following plot are shown in this model:
 
 - loss: reconstruction loss.
 
-  ![loss](images/loss.png)
+  ![loss](image/loss.png)
 
 - perplexity: reconstruction perplexity.
 
-  ![perplexity](images/perplexity.png)
+  ![perplexity](image/perplexity.png)
 
 
 And text output:
