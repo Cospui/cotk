@@ -8,8 +8,8 @@ An implementation of LM(language model).
 
 ### Require Packages
 
-- contk
-- TensorFlow == 1.13
+- cotk
+- TensorFlow == 1.13.1
 - TensorBoardX >= 1.4
 
 
@@ -227,14 +227,5 @@ A man is standing on a dog on a laptop .
 
 |        | Reconstruction Perplexity |
 | ------ | ------------------------- |
-| MSCOCO | 1.01                      |
+| MSCOCO | 13.41                     |
 
-
-
-### Author
-
-[Qi Zhu](https://github.com/zqwerty)
-
-```
-
-```
